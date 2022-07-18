@@ -1,6 +1,6 @@
 (** Compute various information, including:
     - can a function fail (by having `Fail` in its body, or transitively
-      calling a function which can fail)
+      calling a function which can fail), false for globals
     - can a function diverge (bu being recursive, containing a loop or
       transitively calling a function which can diverge)
     - does a function perform stateful operations (i.e., do we need a state
@@ -50,52 +50,65 @@ let analyze_module (m : llbc_module) (funs_map : fun_decl FunDeclId.Map.t)
     let stateful = ref false in
     let divergent = ref false in
 
-    let obj =
-      object
-        inherit [_] iter_statement as super
-
-        method! visit_Assert env a =
-          can_fail := true;
-          super#visit_Assert env a
-
-        method! visit_rvalue _env rv =
-          match rv with
-          | Use _ | Ref _ | Discriminant _ | Aggregate _ -> ()
-          | UnaryOp (uop, _) -> can_fail := EU.unop_can_fail uop || !can_fail
-          | BinaryOp (bop, _, _) ->
-              can_fail := EU.binop_can_fail bop || !can_fail
-
-        method! visit_Call env call =
-          (match call.func with
-          | Regular id ->
-              if FunDeclId.Set.mem id fun_ids then divergent := true
-              else
-                let info = FunDeclId.Map.find id !infos in
-                can_fail := !can_fail || info.can_fail;
-                stateful := !stateful || info.stateful;
-                divergent := !divergent || info.divergent
-          | Assumed id ->
-              (* None of the assumed functions is stateful for now *)
-              can_fail := !can_fail || Assumed.assumed_can_fail id);
-          super#visit_Call env call
-
-        method! visit_Panic env =
-          can_fail := true;
-          super#visit_Panic env
-
-        method! visit_Loop env loop =
-          divergent := true;
-          super#visit_Loop env loop
-      end
-    in
-
     let visit_fun (f : fun_decl) : unit =
-      match f.body with
+      let obj =
+        object (self)
+          inherit [_] iter_statement as super
+
+          method may_fail b =
+            (* The fail flag is disabled for globals : the global body is
+             * normalised into its declaration, which is always successful.
+             * (we check that it is successful in the extracted code: if it is
+             *  not, it leads to a type-checking error in the generated files)
+             *)
+            if f.is_global_body then () else
+            can_fail := !can_fail || b
+
+          method! visit_Assert env a =
+            self#may_fail true;
+            super#visit_Assert env a
+
+            method! visit_rvalue _env rv =
+              match rv with
+              | Use _ | Ref _ | Discriminant _ | Aggregate _ -> ()
+              | UnaryOp (uop, _) -> can_fail := EU.unop_can_fail uop || !can_fail
+              | BinaryOp (bop, _, _) ->
+                  can_fail := EU.binop_can_fail bop || !can_fail
+    
+          method! visit_Call env call =
+            (match call.func with
+            | Regular id ->
+                if FunDeclId.Set.mem id fun_ids then divergent := true
+                else
+                  let info = FunDeclId.Map.find id !infos in
+                  self#may_fail info.can_fail;
+                  stateful := !stateful || info.stateful;
+                  divergent := !divergent || info.divergent
+            | Assumed id ->
+                (* None of the assumed functions is stateful for now *)
+                can_fail := !can_fail || Assumed.assumed_can_fail id);
+            super#visit_Call env call
+
+          method! visit_Panic env =
+            self#may_fail true;
+            super#visit_Panic env
+
+          method! visit_Loop env loop =
+            divergent := true;
+            super#visit_Loop env loop
+        end
+      in
+      assert (not f.is_global_body || not use_state);
+      (match f.body with
       | None ->
           (* Opaque function *)
-          can_fail := true;
+          obj#may_fail true;
           stateful := use_state
-      | Some body -> obj#visit_statement () body.body
+      | Some body -> obj#visit_statement () body.body);
+      (* We ignore on purpose functions that cannot fail: the result of the analysis
+       * is not used yet to adjust the translation so that the functions which
+       * syntactically can't fail don't use an error monad. *)
+      can_fail := not f.is_global_body
     in
     List.iter visit_fun d;
     { can_fail = !can_fail; stateful = !stateful; divergent = !divergent }

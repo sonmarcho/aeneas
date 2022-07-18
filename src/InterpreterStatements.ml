@@ -831,6 +831,16 @@ let rec eval_statement (config : C.config) (st : A.statement) : st_cm_fun =
 
         (* Compose and apply *)
         comp cf_eval_rvalue cf_assign cf ctx
+    | A.AssignGlobal { dst; global } ->
+        (* What codegen do we want ? *)
+        let call : A.call = {
+          func = A.Regular (failwith "TODO InterpretStatements.ml:837");
+          region_args = [];
+          type_args = [];
+          args = [];
+          dest = { var_id = dst; projection = [] };
+        } in
+        eval_function_call config call cf ctx
     | A.FakeRead p ->
         let expand_prim_copy = false in
         let cf_prepare cf =

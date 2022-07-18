@@ -74,6 +74,7 @@ type formatter = {
   fun_name :
     A.fun_id ->
     fun_name ->
+    bool ->
     int ->
     region_group_info option ->
     bool * int ->
@@ -82,17 +83,18 @@ type formatter = {
           - function id: this is especially useful to identify whether the
             function is an assumed function or a local function
           - function basename
+          - flag indicating if the function is a global
           - number of region groups
+          - region group information in case of a backward function
+            (`None` if forward function)
           - pair:
             - do we generate the forward function (it may have been filtered)?
             - the number of extracted backward functions (not necessarily equal
               to the number of region groups, because we may have filtered
               some of them)
-          - region group information in case of a backward function
-            (`None` if forward function)
           TODO: use the fun id for the assumed functions.
        *)
-  decreases_clause_name : FunDeclId.id -> fun_name -> string;
+  decreases_clause_name : A.FunDeclId.id -> fun_name -> string;
       (** Generates the name of the definition used to prove/reason about
           termination. The generated code uses this clause where needed,
           but its body must be defined by the user.
@@ -356,7 +358,7 @@ let id_to_string (id : id) (ctx : extraction_ctx) : string =
       let fun_name =
         match fid with
         | A.Regular fid ->
-            Print.fun_name_to_string (FunDeclId.Map.find fid fun_decls).name
+            Print.fun_name_to_string (A.FunDeclId.Map.find fid fun_decls).name
         | A.Assumed aid -> A.show_assumed_fun_id aid
       in
       let fun_kind =
@@ -369,7 +371,7 @@ let id_to_string (id : id) (ctx : extraction_ctx) : string =
       let fun_name =
         match fid with
         | A.Regular fid ->
-            Print.fun_name_to_string (FunDeclId.Map.find fid fun_decls).name
+            Print.fun_name_to_string (A.FunDeclId.Map.find fid fun_decls).name
         | A.Assumed aid -> A.show_assumed_fun_id aid
       in
       "decreases clause for function: " ^ fun_name
@@ -440,11 +442,13 @@ let ctx_get (id : id) (ctx : extraction_ctx) : string =
       log#serror ("Could not find: " ^ id_to_string id ctx);
       raise Not_found
 
-let ctx_get_function (id : A.fun_id) (rg : RegionGroupId.id option)
+let ctx_get_function (id : A.fun_id)
+    (rg : RegionGroupId.id option)
     (ctx : extraction_ctx) : string =
   ctx_get (FunId (id, rg)) ctx
 
-let ctx_get_local_function (id : FunDeclId.id) (rg : RegionGroupId.id option)
+let ctx_get_local_function (id : A.FunDeclId.id)
+    (rg : RegionGroupId.id option)
     (ctx : extraction_ctx) : string =
   ctx_get_function (A.Regular id) rg ctx
 
@@ -475,7 +479,7 @@ let ctx_get_variant (def_id : type_id) (variant_id : VariantId.id)
     (ctx : extraction_ctx) : string =
   ctx_get (VariantId (def_id, variant_id)) ctx
 
-let ctx_get_decreases_clause (def_id : FunDeclId.id) (ctx : extraction_ctx) :
+let ctx_get_decreases_clause (def_id : A.FunDeclId.id) (ctx : extraction_ctx) :
     string =
   ctx_get (DecreasesClauseId (A.Regular def_id)) ctx
 
@@ -573,7 +577,7 @@ let ctx_add_fun_decl (trans_group : bool * pure_fun_translation)
   (* Lookup the LLBC def to compute the region group information *)
   let def_id = def.def_id in
   let llbc_def =
-    FunDeclId.Map.find def_id ctx.trans_ctx.fun_context.fun_decls
+    A.FunDeclId.Map.find def_id ctx.trans_ctx.fun_context.fun_decls
   in
   let sg = llbc_def.signature in
   let num_rgs = List.length sg.regions_hierarchy in
@@ -596,7 +600,7 @@ let ctx_add_fun_decl (trans_group : bool * pure_fun_translation)
   in
   let def_id = A.Regular def_id in
   let name =
-    ctx.fmt.fun_name def_id def.basename num_rgs rg_info (keep_fwd, num_backs)
+    ctx.fmt.fun_name def_id def.basename def.is_global_body num_rgs rg_info (keep_fwd, num_backs)
   in
   (* Add the function name *)
   let ctx = ctx_add (FunId (def_id, def.back_id)) name ctx in
@@ -666,8 +670,12 @@ let compute_type_decl_name (fmt : formatter) (def : type_decl) : string =
     information.
     TODO: move all those helpers.
 *)
-let default_fun_suffix (num_region_groups : int) (rg : region_group_info option)
-    ((keep_fwd, num_backs) : bool * int) : string =
+let default_fun_suffix
+    (is_global : bool)
+    (num_region_groups : int)
+    (rg : region_group_info option)
+    ((keep_fwd, num_backs) : bool * int)
+    : string =
   (* There are several cases:
      - [rg] is `Some`: this is a forward function:
        - we add "_fwd"
@@ -683,6 +691,7 @@ let default_fun_suffix (num_region_groups : int) (rg : region_group_info option)
      we could not add the "_fwd" suffix) to prevent name clashes between
      definitions (in particular between type and function definitions).
   *)
+  if is_global then "_c" else
   match rg with
   | None -> "_fwd"
   | Some rg ->

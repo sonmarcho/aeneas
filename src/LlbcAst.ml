@@ -1,10 +1,11 @@
-open Identifiers
 open Names
 open Types
 open Values
 open Expressions
+open Identifiers
 
 module FunDeclId = IdGen ()
+module GlobalDeclId = IdGen ()
 
 type var = {
   index : VarId.id;  (** Unique variable identifier *)
@@ -35,6 +36,12 @@ type assumed_fun_id =
 
 type fun_id = Regular of FunDeclId.id | Assumed of assumed_fun_id
 [@@deriving show, ord]
+
+type assign_global = {
+  dst : VarId.id;
+  global : GlobalDeclId.id;
+}
+[@@deriving show]
 
 type assertion = { cond : operand; expected : bool } [@@deriving show]
 
@@ -77,6 +84,8 @@ class ['self] iter_statement_base =
   object (_self : 'self)
     inherit [_] VisitorsRuntime.iter
 
+    method visit_assign_global : 'env -> assign_global -> unit = fun _ _ -> ()
+
     method visit_place : 'env -> place -> unit = fun _ _ -> ()
 
     method visit_rvalue : 'env -> rvalue -> unit = fun _ _ -> ()
@@ -99,6 +108,8 @@ class ['self] map_statement_base =
   object (_self : 'self)
     inherit [_] VisitorsRuntime.map
 
+    method visit_assign_global : 'env -> assign_global -> assign_global = fun _ x -> x
+
     method visit_place : 'env -> place -> place = fun _ x -> x
 
     method visit_rvalue : 'env -> rvalue -> rvalue = fun _ x -> x
@@ -120,6 +131,7 @@ class ['self] map_statement_base =
 
 type statement =
   | Assign of place * rvalue
+  | AssignGlobal of assign_global
   | FakeRead of place
   | SetDiscriminant of place * VariantId.id
   | Drop of place
@@ -178,5 +190,14 @@ type fun_decl = {
   name : fun_name;
   signature : fun_sig;
   body : fun_body option;
+  is_global_body : bool;
+}
+[@@deriving show]
+
+type global_decl = {
+  def_id : GlobalDeclId.id;
+  body_id: FunDeclId.id;
+  name : global_name;
+  ty: ety;
 }
 [@@deriving show]

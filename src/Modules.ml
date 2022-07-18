@@ -7,7 +7,8 @@ type 'id g_declaration_group = NonRec of 'id | Rec of 'id list
 type type_declaration_group = TypeDeclId.id g_declaration_group
 [@@deriving show]
 
-type fun_declaration_group = FunDeclId.id g_declaration_group [@@deriving show]
+type fun_declaration_group = FunDeclId.id g_declaration_group
+[@@deriving show]
 
 (** Module declaration *)
 type declaration_group =
@@ -20,11 +21,12 @@ type llbc_module = {
   declarations : declaration_group list;
   types : type_decl list;
   functions : fun_decl list;
+  globals : global_decl list;
 }
 (** LLBC module - TODO: rename to crate *)
 
 let compute_defs_maps (m : llbc_module) :
-    type_decl TypeDeclId.Map.t * fun_decl FunDeclId.Map.t =
+    type_decl TypeDeclId.Map.t * fun_decl FunDeclId.Map.t * global_decl GlobalDeclId.Map.t =
   let types_map =
     List.fold_left
       (fun m (def : type_decl) -> TypeDeclId.Map.add def.def_id def m)
@@ -35,7 +37,12 @@ let compute_defs_maps (m : llbc_module) :
       (fun m (def : fun_decl) -> FunDeclId.Map.add def.def_id def m)
       FunDeclId.Map.empty m.functions
   in
-  (types_map, funs_map)
+  let globals_map =
+    List.fold_left
+      (fun m (def : global_decl) -> GlobalDeclId.Map.add def.def_id def m)
+      GlobalDeclId.Map.empty m.globals
+  in
+  (types_map, funs_map, globals_map)
 
 (** Split a module's declarations between types and functions *)
 let split_declarations (decls : declaration_group list) :

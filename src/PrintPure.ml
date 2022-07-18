@@ -12,7 +12,6 @@ module RegionId = T.RegionId
 module VariantId = T.VariantId
 module FieldId = T.FieldId
 module SymbolicValueId = V.SymbolicValueId
-module FunDeclId = A.FunDeclId
 
 type type_formatter = {
   type_var_id_to_string : TypeVarId.id -> string;
@@ -45,6 +44,7 @@ type ast_formatter = {
     TypeDeclId.id -> VariantId.id option -> FieldId.id -> string option;
   adt_field_names : TypeDeclId.id -> VariantId.id option -> string list option;
   fun_decl_id_to_string : A.FunDeclId.id -> string;
+  global_decl_id_to_string : A.GlobalDeclId.id -> string;
 }
 
 let ast_to_value_formatter (fmt : ast_formatter) : value_formatter =
@@ -62,6 +62,7 @@ let ast_to_type_formatter (fmt : ast_formatter) : type_formatter =
 
 let name_to_string = Print.name_to_string
 let fun_name_to_string = Print.fun_name_to_string
+let global_name_to_string = Print.global_name_to_string
 let option_to_string = Print.option_to_string
 let type_var_to_string = Print.Types.type_var_to_string
 let integer_type_to_string = Print.Types.integer_type_to_string
@@ -85,8 +86,11 @@ let mk_type_formatter (type_decls : T.type_decl TypeDeclId.Map.t)
    functions (there is a difference between the forward/backward functions...)
    while we only need those definitions to lookup proper names for the def ids.
 *)
-let mk_ast_formatter (type_decls : T.type_decl TypeDeclId.Map.t)
-    (fun_decls : A.fun_decl FunDeclId.Map.t) (type_params : type_var list) :
+let mk_ast_formatter
+    (type_decls : T.type_decl TypeDeclId.Map.t)
+    (fun_decls : A.fun_decl A.FunDeclId.Map.t)
+    (global_decls : A.global_decl A.GlobalDeclId.Map.t)
+    (type_params : type_var list) :
     ast_formatter =
   let type_var_id_to_string vid =
     let var = T.TypeVarId.nth type_params vid in
@@ -113,6 +117,10 @@ let mk_ast_formatter (type_decls : T.type_decl TypeDeclId.Map.t)
     let def = A.FunDeclId.Map.find def_id fun_decls in
     fun_name_to_string def.name
   in
+  let global_decl_id_to_string def_id =
+    let def = A.GlobalDeclId.Map.find def_id global_decls in
+    global_name_to_string def.name
+  in
   {
     type_var_id_to_string;
     type_decl_id_to_string;
@@ -121,6 +129,7 @@ let mk_ast_formatter (type_decls : T.type_decl TypeDeclId.Map.t)
     adt_field_names;
     adt_field_to_string;
     fun_decl_id_to_string;
+    global_decl_id_to_string;
   }
 
 let type_id_to_string (fmt : type_formatter) (id : type_id) : string =
@@ -481,6 +490,7 @@ and app_to_string (fmt : ast_formatter) (inside : bool) (indent : string)
         let qualif_s =
           match qualif.id with
           | Func fun_id -> fun_id_to_string fmt fun_id
+          | Global global_id -> fmt.global_decl_id_to_string global_id
           | AdtCons adt_cons_id ->
               let variant_s =
                 adt_variant_to_string
